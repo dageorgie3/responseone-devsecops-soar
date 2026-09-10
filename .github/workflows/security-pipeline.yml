@@ -1,0 +1,56 @@
+name: ResponseOne Security Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  sast:
+    name: Semgrep SAST
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Ensure output dir exists
+        run: mkdir -p scans/sast
+
+      - name: Run Semgrep (JSON)
+        run: |
+          semgrep scan \
+            --config auto \
+            --json \
+            --output scans/sast/semgrep-results.json \
+            app/
+
+      - name: Run Semgrep (SARIF)
+        run: |
+          semgrep scan \
+            --config auto \
+            --sarif \
+            --output scans/sast/semgrep-results.sarif \
+            app/
+
+      - name: Upload SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: scans/sast/semgrep-results.sarif
+
+      - name: Upload scan results as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-scan-results
+          path: scans/sast/
