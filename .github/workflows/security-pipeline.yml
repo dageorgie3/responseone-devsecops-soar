@@ -45,7 +45,7 @@ jobs:
             app/
 
       - name: Upload SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: scans/sast/semgrep-results.sarif
 
