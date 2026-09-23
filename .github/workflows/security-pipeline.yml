@@ -39,16 +39,37 @@ jobs:
         with:
           name: semgrep-scan-results
           path: scans/sast/
-
   secrets:
     name: Gitleaks Secret Scan
     runs-on: ubuntu-latest
+    container:
+      image: zricethezav/gitleaks:latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Ensure output dir exists
+        run: mkdir -p scans/secrets/juice-shop
+
+      - name: Run Gitleaks (SARIF)
+        run: |
+          gitleaks detect \
+            --source=. \
+            --report-format=sarif \
+            --report-path=scans/secrets/juice-shop/gitleaks-results.sarif \
+            --no-git \
+            --exit-code=0
+
+      - name: Upload SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: scans/secrets/juice-shop/gitleaks-results.sarif
+
+      - name: Upload scan results as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-scan-results
+          path: scans/secrets/juice-shop/
