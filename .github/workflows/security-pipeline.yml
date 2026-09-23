@@ -13,57 +13,41 @@ on:
 permissions:
   contents: read
   security-events: write
-
 jobs:
   sast:
     name: Semgrep SAST
     runs-on: ubuntu-latest
     container:
       image: semgrep/semgrep
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
-
-      - name: Ensure output directory exists
-        run: mkdir -p scans/sast/juice-shop
-
-      - name: Run Semgrep on OWASP Juice Shop (JSON)
+      - name: Ensure output dir exists
+        run: mkdir -p scans/sast
+      - name: Run Semgrep (JSON)
         run: |
-          semgrep scan \
-            --config auto \
-            --json \
-            --output scans/sast/juice-shop/semgrep-results.json \
-            app/juice-shop/
-
-      - name: Run Semgrep on OWASP Juice Shop (SARIF)
+          semgrep scan --config auto --json --output scans/sast/semgrep-results.json app/
+      - name: Run Semgrep (SARIF)
         run: |
-          semgrep scan \
-            --config auto \
-            --sarif \
-            --output scans/sast/juice-shop/semgrep-results.sarif \
-            app/juice-shop/
-
+          semgrep scan --config auto --sarif --output scans/sast/semgrep-results.sarif app/
       - name: Upload SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: scans/sast/juice-shop/semgrep-results.sarif
-
-      - name: Upload Juice Shop SAST results as artifact
+          sarif_file: scans/sast/semgrep-results.sarif
+      - name: Upload scan results as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: juice-shop-semgrep-sast-results
-          path: scans/sast/juice-shop/
-   secrets:
+          name: semgrep-scan-results
+          path: scans/sast/
+
+  secrets:
     name: Gitleaks Secret Scan
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-
       - name: Run Gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
