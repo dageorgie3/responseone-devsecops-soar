@@ -54,7 +54,7 @@ jobs:
         with:
           name: juice-shop-semgrep-sast-results
           path: scans/sast/juice-shop/
-    secrets:
+   secrets:
     name: Gitleaks Secret Scan
     runs-on: ubuntu-latest
 
