@@ -120,7 +120,8 @@ jobs:
             zap-baseline.py \
             -t http://127.0.0.1:3000 \
             -r juice-shop-dast-report.html \
-            -J juice-shop-dast-report.json \ -I
+            -J juice-shop-dast-report.json \
+            -I
 
       - name: Upload ZAP DAST results
         uses: actions/upload-artifact@v4
