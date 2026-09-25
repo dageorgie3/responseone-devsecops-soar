@@ -128,3 +128,157 @@ jobs:
         with:
           name: juice-shop-zap-dast-results
           path: scans/dast/juice-shop/
+
+  security-gate:
+    name: Security Gate
+    runs-on: ubuntu-latest
+
+    needs:
+      - sast
+      - secrets
+      - dast
+
+    steps:
+      - name: Download Semgrep results
+        uses: actions/download-artifact@v4
+        with:
+          name: semgrep-scan-results
+          path: gate-results/semgrep
+
+      - name: Download Gitleaks results
+        uses: actions/download-artifact@v4
+        with:
+          name: gitleaks-scan-results
+          path: gate-results/gitleaks
+
+      - name: Download ZAP results
+        uses: actions/download-artifact@v4
+        with:
+          name: juice-shop-zap-dast-results
+          path: gate-results/zap
+
+      - name: Check security thresholds
+        run: |
+          echo "======================================"
+          echo "       RESPONSEONE SECURITY GATE"
+          echo "======================================"
+
+          echo ""
+          echo "Threshold policy:"
+          echo "Semgrep:  High/Critical = BLOCK"
+          echo "Gitleaks: Any secret = BLOCK"
+          echo "ZAP:      High = BLOCK"
+          echo "Medium/Low findings = REPORT ONLY"
+          echo ""
+
+          # -----------------------------
+          # SEMGREP THRESHOLD
+          # -----------------------------
+          python3 - <<'PY'
+          import json
+          import sys
+
+          path = "gate-results/semgrep/semgrep-results.json"
+
+          try:
+              with open(path) as f:
+                  data = json.load(f)
+
+              findings = data.get("results", [])
+
+              high = 0
+              critical = 0
+
+              for finding in findings:
+                  severity = finding.get("extra", {}).get("severity", "").upper()
+
+                  if severity == "ERROR":
+                      high += 1
+                  elif severity == "CRITICAL":
+                      critical += 1
+
+              print(f"Semgrep findings: {len(findings)}")
+              print(f"High/Error: {high}")
+              print(f"Critical: {critical}")
+
+              if high > 0 or critical > 0:
+                  print("SECURITY GATE: Semgrep threshold exceeded.")
+                  sys.exit(1)
+
+              print("SECURITY GATE: Semgrep threshold passed.")
+
+          except FileNotFoundError:
+              print("Semgrep report not found.")
+              sys.exit(1)
+          PY
+
+          # -----------------------------
+          # GITLEAKS THRESHOLD
+          # -----------------------------
+          python3 - <<'PY'
+          import json
+          import glob
+          import sys
+
+          files = glob.glob("gate-results/gitleaks/**/*.sarif", recursive=True)
+
+          if not files:
+              print("Gitleaks SARIF report not found.")
+              sys.exit(1)
+
+          with open(files[0]) as f:
+              data = json.load(f)
+
+          findings = []
+
+          for run in data.get("runs", []):
+              findings.extend(run.get("results", []))
+
+          print(f"Gitleaks findings: {len(findings)}")
+
+          if len(findings) > 0:
+              print("SECURITY GATE: Secret detected.")
+              sys.exit(1)
+
+          print("SECURITY GATE: Gitleaks threshold passed.")
+          PY
+
+          # -----------------------------
+          # ZAP THRESHOLD
+          # -----------------------------
+          python3 - <<'PY'
+          import json
+          import glob
+          import sys
+
+          files = glob.glob("gate-results/zap/**/*.json", recursive=True)
+
+          if not files:
+              print("ZAP JSON report not found.")
+              sys.exit(1)
+
+          with open(files[0]) as f:
+              data = json.load(f)
+
+          high = 0
+
+          for site in data.get("site", []):
+              for alert in site.get("alerts", []):
+                  risk = alert.get("riskdesc", "").upper()
+
+                  if risk.startswith("HIGH"):
+                      high += 1
+
+          print(f"ZAP High findings: {high}")
+
+          if high > 0:
+              print("SECURITY GATE: ZAP High-risk threshold exceeded.")
+              sys.exit(1)
+
+          print("SECURITY GATE: ZAP threshold passed.")
+          PY
+
+          echo ""
+          echo "======================================"
+          echo "SECURITY GATE PASSED"
+          echo "======================================"
