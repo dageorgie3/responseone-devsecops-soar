@@ -73,3 +73,52 @@ jobs:
         with:
           name: gitleaks-scan-results
           path: scans/secrets/juice-shop/
+  dast:
+    name: OWASP ZAP DAST
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Create DAST output directory
+        run: mkdir -p scans/dast/juice-shop
+
+      - name: Start OWASP Juice Shop
+        run: |
+          docker run -d \
+            --name juice-shop \
+            -p 3000:3000 \
+            bkimminich/juice-shop
+
+      - name: Wait for Juice Shop
+        run: |
+          for i in {1..30}; do
+            if curl -fs http://localhost:3000 > /dev/null; then
+              echo "Juice Shop is ready."
+              exit 0
+            fi
+            echo "Waiting for Juice Shop..."
+            sleep 2
+          done
+
+          echo "Juice Shop failed to start."
+          docker logs juice-shop
+          exit 1
+
+      - name: Run OWASP ZAP Baseline Scan
+        run: |
+          docker run --rm \
+            --network host \
+            -v "${{ github.workspace }}/scans/dast/juice-shop:/zap/wrk/:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+            -t http://127.0.0.1:3000 \
+            -r juice-shop-dast-report.html \
+            -J juice-shop-dast-report.json
+
+      - name: Upload ZAP DAST results
+        uses: actions/upload-artifact@v4
+        with:
+          name: juice-shop-zap-dast-results
+          path: scans/dast/juice-shop/
