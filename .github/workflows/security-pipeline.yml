@@ -292,38 +292,163 @@ jobs:
     if: ${{ always() }}
 
     steps:
+      - name: Download Semgrep results
+        uses: actions/download-artifact@v4
+        with:
+          name: semgrep-scan-results
+          path: soar-results/semgrep
+
+      - name: Download Gitleaks results
+        uses: actions/download-artifact@v4
+        with:
+          name: gitleaks-scan-results
+          path: soar-results/gitleaks
+
+      - name: Download ZAP results
+        uses: actions/download-artifact@v4
+        with:
+          name: juice-shop-zap-dast-results
+          path: soar-results/zap
+
+      - name: Build security alert
+        id: build-alert
+        env:
+          GATE_RESULT: ${{ needs.security-gate.result }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import glob
+          import os
+
+          gate_result = os.environ.get("GATE_RESULT", "unknown")
+
+          status = "PASSED" if gate_result == "success" else "BLOCKED"
+
+          # -----------------------------
+          # SEMGREP
+          # -----------------------------
+          semgrep_files = glob.glob(
+              "soar-results/semgrep/**/semgrep-results.json",
+              recursive=True
+          )
+
+          semgrep_findings = []
+          semgrep_high = 0
+          semgrep_critical = 0
+
+          if semgrep_files:
+              with open(semgrep_files[0]) as f:
+                  data = json.load(f)
+
+              for finding in data.get("results", []):
+                  extra = finding.get("extra", {})
+                  severity = extra.get("severity", "").upper()
+
+                  if severity == "ERROR":
+                      semgrep_high += 1
+                  elif severity == "CRITICAL":
+                      semgrep_critical += 1
+
+                  if severity in ["ERROR", "CRITICAL"]:
+                      semgrep_findings.append({
+                          "rule": finding.get("check_id"),
+                          "file": finding.get("path"),
+                          "line": finding.get("start", {}).get("line"),
+                          "severity": severity,
+                          "message": extra.get("message", "")
+                      })
+
+          # -----------------------------
+          # GITLEAKS
+          # -----------------------------
+          gitleaks_files = glob.glob(
+              "soar-results/gitleaks/**/*.sarif",
+              recursive=True
+          )
+
+          gitleaks_count = 0
+
+          if gitleaks_files:
+              with open(gitleaks_files[0]) as f:
+                  data = json.load(f)
+
+              for run in data.get("runs", []):
+                  gitleaks_count += len(run.get("results", []))
+
+          # -----------------------------
+          # ZAP
+          # -----------------------------
+          zap_files = glob.glob(
+              "soar-results/zap/**/*.json",
+              recursive=True
+          )
+
+          zap_high = 0
+          zap_medium = 0
+          zap_low = 0
+
+          if zap_files:
+              with open(zap_files[0]) as f:
+                  data = json.load(f)
+
+              for site in data.get("site", []):
+                  for alert in site.get("alerts", []):
+                      risk = alert.get("riskdesc", "").upper()
+
+                      if risk.startswith("HIGH"):
+                          zap_high += 1
+                      elif risk.startswith("MEDIUM"):
+                          zap_medium += 1
+                      elif risk.startswith("LOW"):
+                          zap_low += 1
+
+          # -----------------------------
+          # BUILD PAYLOAD
+          # -----------------------------
+          payload = {
+              "pipeline": "ResponseOne Security Pipeline",
+              "status": status,
+              "gate_result": gate_result,
+
+              "semgrep": {
+                  "high": semgrep_high,
+                  "critical": semgrep_critical,
+                  "blocking_findings": semgrep_findings[:20]
+              },
+
+              "gitleaks": {
+                  "findings": gitleaks_count
+              },
+
+              "zap": {
+                  "high": zap_high,
+                  "medium": zap_medium,
+                  "low": zap_low
+              },
+
+              "message": (
+                  "Security Gate blocked the pipeline because one or more "
+                  "security thresholds were exceeded."
+                  if status == "BLOCKED"
+                  else
+                  "Security Gate passed."
+              )
+          }
+
+          with open("security-alert.json", "w") as f:
+              json.dump(payload, f)
+
+          print(json.dumps(payload, indent=2))
+          PY
+
       - name: Send security alert to Shuffle
         env:
           SHUFFLE_WEBHOOK_URL: ${{ secrets.SHUFFLE_WEBHOOK_URL }}
-          GATE_RESULT: ${{ needs.security-gate.result }}
         run: |
-          echo "======================================"
-          echo "       RESPONSEONE SOAR ALERT"
-          echo "======================================"
-          echo "Security Gate result: $GATE_RESULT"
-          echo ""
-
-          if [ "$GATE_RESULT" = "success" ]; then
-            STATUS="PASSED"
-          else
-            STATUS="BLOCKED"
-          fi
-
-          curl -X POST "$SHUFFLE_WEBHOOK_URL" \
+          curl --fail-with-body \
+            -X POST "$SHUFFLE_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
-            -d "$(jq -n \
-              --arg pipeline "ResponseOne Security Pipeline" \
-              --arg status "$STATUS" \
-              --arg gate_result "$GATE_RESULT" \
-              --arg scanner "Security Gate" \
-              --arg message "ResponseOne security pipeline completed with security gate status: $STATUS" \
-              '{
-                pipeline: $pipeline,
-                status: $status,
-                gate_result: $gate_result,
-                scanner: $scanner,
-                message: $message
-              }')"
+            --data-binary @security-alert.json
 
           echo ""
-          echo "SOAR notification sent to Shuffle."
+          echo "Security findings sent to Shuffle."
